@@ -15,3 +15,14 @@
 @media(max-width:840px){.monitor{grid-template-columns:1fr}.overview-panel{border-right:0;border-bottom:1px solid var(--line)}.data-footer{grid-template-columns:1fr 1fr}.auto-refresh{grid-column:1/-1}.water-overview{min-height:260px}.heading-meta{justify-items:start}}
 @media(max-width:560px){.dashboard-shell{padding-inline:16px}.topbar{height:76px}.brand span{display:none}.connection-state{font-size:.75rem}.page-heading{align-items:flex-start;flex-direction:column;padding:32px 0 22px}.heading-meta{display:none}.overview-panel,.measurements-panel{padding:22px 18px}.panel-topline{align-items:flex-start;flex-direction:column}.water-overview{gap:25px;min-height:250px;padding:28px 0}.tank{width:110px;height:176px}.sensor-readout{grid-template-columns:1fr}.sensor-readout>div{padding:14px 6px}.sensor-readout>div+div{padding-left:6px;border-left:0;border-top:1px solid var(--line)}.system-notice{align-items:flex-start;flex-direction:column}.data-footer{grid-template-columns:1fr;gap:14px}.auto-refresh{grid-column:auto}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
+
+/* Thai marks need more vertical room than Latin fonts; prevent clipped vowels/tones. */
+.page-heading h1{line-height:1.45;letter-spacing:-.015em;padding-block:.08em}
+.panel-topline h2{line-height:1.55;letter-spacing:0;padding-block:.05em}
+.water-copy>strong{line-height:1.45;letter-spacing:-.025em;padding-block:.06em}
+.measurement-head h2,.measurement-head p,.sensor-readout span,.sensor-readout strong,.data-footer span,.data-footer strong{line-height:1.7}
+.status-mark{line-height:1.65;white-space:normal}
+.range-labels .status-mark{transform:none}
+.kicker,.section-label{line-height:1.7;letter-spacing:.045em}
+.connection-state{max-width:48%;line-height:1.65;text-align:right}
+@media(max-width:560px){.page-heading h1{font-size:clamp(1.8rem,8vw,2.4rem);line-height:1.45}.connection-state{max-width:54%;font-size:.72rem}.panel-topline{gap:8px}.status-mark{max-width:100%}.water-copy>strong{font-size:clamp(1.8rem,8vw,2.4rem)}.range-labels{gap:8px}.range-labels .status-mark{font-size:.66rem;padding:4px 6px}}
