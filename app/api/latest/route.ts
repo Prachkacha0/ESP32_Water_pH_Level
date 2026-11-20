@@ -10,9 +10,11 @@ export async function GET() {
     );
   }
 
+  const baseUrl = url.replace(/\/rest\/v1\/?$/, "").replace(/\/+$/, "");
+
   try {
     const response = await fetch(
-      `${url}/rest/v1/readings?select=device_id,ph,temperature,sensor1,sensor2,water_level,created_at&order=created_at.desc&limit=1`,
+      `${baseUrl}/rest/v1/readings?select=device_id,ph,temperature,sensor1,sensor2,water_level,created_at&order=created_at.desc&limit=1`,
       { headers: { apikey: key }, cache: "no-store" },
     );
     if (!response.ok) {

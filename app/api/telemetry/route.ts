@@ -20,6 +20,7 @@ export async function POST(request: Request) {
   if (!url || !key) {
     return Response.json({ error: "Database is not configured" }, { status: 503 });
   }
+  const baseUrl = url.replace(/\/rest\/v1\/?$/, "").replace(/\/+$/, "");
 
   let body: Record<string, unknown>;
   try { body = await request.json(); }
@@ -42,7 +43,7 @@ export async function POST(request: Request) {
     device_id: String(body.deviceId ?? "water-monitor-01").slice(0, 64),
     ph, temperature, sensor1, sensor2, water_level: waterLevel,
   };
-  const response = await fetch(`${url}/rest/v1/readings`, {
+  const response = await fetch(`${baseUrl}/rest/v1/readings`, {
     method: "POST",
     headers: {
       apikey: key,
