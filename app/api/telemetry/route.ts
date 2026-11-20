@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   }
 
   const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const key = process.env.SUPABASE_SECRET_KEY;
   if (!url || !key) {
     return Response.json({ error: "Database is not configured" }, { status: 503 });
   }
@@ -46,7 +46,6 @@ export async function POST(request: Request) {
     method: "POST",
     headers: {
       apikey: key,
-      Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
       Prefer: "return=minimal",
     },

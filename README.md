@@ -13,7 +13,7 @@ This repository contains:
 2. Run `supabase.sql` in the Supabase SQL Editor.
 3. In Vercel, add these Environment Variables:
    - `SUPABASE_URL`
-   - `SUPABASE_SERVICE_ROLE_KEY` (server-only; never expose it in browser code)
+   - `SUPABASE_SECRET_KEY` (`sb_secret_...`, server-only; never expose it in browser code)
    - `DEVICE_API_KEY` (use a long random value)
 4. Redeploy the Vercel project.
 
