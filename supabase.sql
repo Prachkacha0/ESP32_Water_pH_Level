@@ -14,5 +14,10 @@ create index if not exists readings_created_at_idx
 
 alter table public.readings enable row level security;
 
+-- The server-side Supabase secret uses the service_role database role.
+-- Tables created in the SQL Editor may not grant it privileges automatically.
+grant select, insert on table public.readings to service_role;
+grant usage, select on sequence public.readings_id_seq to service_role;
+
 -- No public policies are created. Vercel accesses this table using the
 -- server-only service role key; browsers and ESP32 never receive that key.
