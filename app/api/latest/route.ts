@@ -16,6 +16,8 @@ export async function GET() {
       { headers: { apikey: key }, cache: "no-store" },
     );
     if (!response.ok) {
+      const diagnostic = (await response.text()).slice(0, 500);
+      console.error("Supabase latest-reading request failed", response.status, diagnostic);
       return Response.json(
         {
           configured: true,
