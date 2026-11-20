@@ -8,11 +8,17 @@
 #include <DallasTemperature.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <HTTPClient.h>
 #include <WebServer.h>
 #include <WiFiManager.h>
 #include <UniversalTelegramBot.h>
 #include <Preferences.h>
 #include <time.h>
+
+// Supplied only at compile time. The real key is never committed to Git.
+#ifndef CLOUD_DEVICE_KEY
+#define CLOUD_DEVICE_KEY ""
+#endif
 
 #define PH_SENSOR_PIN       34
 #define DS18B20_PIN          4
@@ -38,6 +44,7 @@ bool dashboardRoutesConfigured = false;
 
 constexpr char CONFIG_AP_NAME[] = "WaterMonitor-Setup";
 constexpr char CONFIG_AP_PASSWORD[] = "water1234";
+constexpr char CLOUD_API_URL[] = "https://esp32-water-ph.vercel.app/api/telemetry";
 constexpr unsigned long CONFIG_BUTTON_HOLD_MS = 3000;
 constexpr unsigned long TEMPERATURE_CONVERSION_MS = 750;
 constexpr uint8_t LEVEL_DETECTED_STATE = HIGH; // Change to LOW if sensor logic is reversed.
@@ -60,13 +67,18 @@ constexpr unsigned long DISPLAY_INTERVAL_MS = 1000;
 constexpr unsigned long SERIAL_INTERVAL_MS = 2000;
 constexpr unsigned long TELEGRAM_RETRY_MS = 60000;
 constexpr unsigned long TELEGRAM_REMINDER_MS = 1800000;
+constexpr unsigned long CLOUD_UPLOAD_INTERVAL_MS = 15000;
+constexpr unsigned long CLOUD_HTTP_TIMEOUT_MS = 8000;
 
 char telegramBotToken[64] = "";
 char telegramChatId[32] = "";
+char cloudDeviceKey[96] = CLOUD_DEVICE_KEY;
 
 WiFiManagerParameter telegramTokenParameter(
     "tg_token", "Telegram Bot Token", "", 63, "type='password'");
 WiFiManagerParameter telegramChatParameter("tg_chat", "Telegram Chat ID", "", 31);
+WiFiManagerParameter cloudKeyParameter(
+    "cloud_key", "Cloud Device API Key", "", 95, "type='password'");
 WiFiManagerParameter temperatureMinimumParameter(
     "temp_min", "Temperature minimum (C)", "24.0", 8, "type='number' step='0.1'");
 WiFiManagerParameter temperatureMaximumParameter(
@@ -93,6 +105,42 @@ bool configButtonWasPressed = false;
 bool configButtonHandled = false;
 bool ntpStarted = false;
 unsigned long settingsSavedAt = 0;
+unsigned long lastCloudUploadAttempt = 0;
+unsigned long lastCloudUploadSuccess = 0;
+bool cloudLastUploadOk = false;
+
+// Vercel currently chains to GTS Root R1. Source: https://pki.goog/roots.pem
+const char CLOUD_ROOT_CA[] PROGMEM = R"CERT(-----BEGIN CERTIFICATE-----
+MIIFVzCCAz+gAwIBAgINAgPlk28xsBNJiGuiFzANBgkqhkiG9w0BAQwFADBHMQsw
+CQYDVQQGEwJVUzEiMCAGA1UEChMZR29vZ2xlIFRydXN0IFNlcnZpY2VzIExMQzEU
+MBIGA1UEAxMLR1RTIFJvb3QgUjEwHhcNMTYwNjIyMDAwMDAwWhcNMzYwNjIyMDAw
+MDAwWjBHMQswCQYDVQQGEwJVUzEiMCAGA1UEChMZR29vZ2xlIFRydXN0IFNlcnZp
+Y2VzIExMQzEUMBIGA1UEAxMLR1RTIFJvb3QgUjEwggIiMA0GCSqGSIb3DQEBAQUA
+A4ICDwAwggIKAoICAQC2EQKLHuOhd5s73L+UPreVp0A8of2C+X0yBoJx9vaMf/vo
+27xqLpeXo4xL+Sv2sfnOhB2x+cWX3u+58qPpvBKJXqeqUqv4IyfLpLGcY9vXmX7w
+Cl7raKb0xlpHDU0QM+NOsROjyBhsS+z8CZDfnWQpJSMHobTSPS5g4M/SCYe7zUjw
+TcLCeoiKu7rPWRnWr4+wB7CeMfGCwcDfLqZtbBkOtdh+JhpFAz2weaSUKK0Pfybl
+qAj+lug8aJRT7oM6iCsVlgmy4HqMLnXWnOunVmSPlk9orj2XwoSPwLxAwAtcvfaH
+szVsrBhQf4TgTM2S0yDpM7xSma8ytSmzJSq0SPly4cpk9+aCEI3oncKKiPo4Zor8
+Y/kB+Xj9e1x3+naH+uzfsQ55lVe0vSbv1gHR6xYKu44LtcXFilWr06zqkUspzBmk
+MiVOKvFlRNACzqrOSbTqn3yDsEB750Orp2yjj32JgfpMpf/VjsPOS+C12LOORc92
+wO1AK/1TD7Cn1TsNsYqiA94xrcx36m97PtbfkSIS5r762DL8EGMUUXLeXdYWk70p
+aDPvOmbsB4om3xPXV2V4J95eSRQAogB/mqghtqmxlbCluQ0WEdrHbEg8QOB+DVrN
+VjzRlwW5y0vtOUucxD/SVRNuJLDWcfr0wbrM7Rv1/oFB2ACYPTrIrnqYNxgFlQID
+AQABo0IwQDAOBgNVHQ8BAf8EBAMCAYYwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4E
+FgQU5K8rJnEaK0gnhS9SZizv8IkTcT4wDQYJKoZIhvcNAQEMBQADggIBAJ+qQibb
+C5u+/x6Wki4+omVKapi6Ist9wTrYggoGxval3sBOh2Z5ofmmWJyq+bXmYOfg6LEe
+QkEzCzc9zolwFcq1JKjPa7XSQCGYzyI0zzvFIoTgxQ6KfF2I5DUkzps+GlQebtuy
+h6f88/qBVRRiClmpIgUxPoLW7ttXNLwzldMXG+gnoot7TiYaelpkttGsN/H9oPM4
+7HLwEXWdyzRSjeZ2axfG34arJ45JK3VmgRAhpuo+9K4l/3wV3s6MJT/KYnAK9y8J
+ZgfIPxz88NtFMN9iiMG1D53Dn0reWVlHxYciNuaCp+0KueIHoI17eko8cdLiA6Ef
+MgfdG+RCzgwARWGAtQsgWSl4vflVy2PFPEz0tv/bal8xa5meLMFrUKTX5hgUvYU/
+Z6tGn6D/Qqc6f1zLXbBwHSs09dR2CQzreExZBfMzQsNhFRAbd03OIozUhfJFfbdT
+6u9AWpQKXCBfTkBdYiJ23//OYb2MI3jSNwLgjt7RETeJ9r/tSQdirpLsQBqvFAnZ
+0E6yove+7u7Y/9waLd64NnHi/Hm3lCXRSHNboTXns5lndcEZOitHTtNCjv0xyBZm
+2tIMPNuzjsmhDYAPexZ3FL//2wmUspO8IFgV6dtxQ/PeEMMA3KgqlbbC1j+Qa3bb
+bP6MvPJwNQzcmRk13NfIRmPVNnGuV/u3gm3c
+-----END CERTIFICATE-----)CERT";
 
 struct AlarmState {
   bool initialized = false;
@@ -224,8 +272,11 @@ void loadSettings() {
   preferences.begin("watermon", true);
   String token = preferences.getString("tg_token", "");
   String chat = preferences.getString("tg_chat", "");
+  String savedCloudKey = preferences.getString("cloud_key", "");
   strlcpy(telegramBotToken, token.c_str(), sizeof(telegramBotToken));
   strlcpy(telegramChatId, chat.c_str(), sizeof(telegramChatId));
+  if (savedCloudKey.length())
+    strlcpy(cloudDeviceKey, savedCloudKey.c_str(), sizeof(cloudDeviceKey));
   temperatureMinimum = preferences.getFloat("temp_min", 24.0f);
   temperatureMaximum = preferences.getFloat("temp_max", 29.0f);
   phMinimum = preferences.getFloat("ph_min", 6.0f);
@@ -243,6 +294,7 @@ void updateParameterDefaults() {
   char value[12];
   telegramTokenParameter.setValue(telegramBotToken, 63);
   telegramChatParameter.setValue(telegramChatId, 31);
+  cloudKeyParameter.setValue(cloudDeviceKey, 95);
   snprintf(value, sizeof(value), "%.1f", temperatureMinimum);
   temperatureMinimumParameter.setValue(value, 8);
   snprintf(value, sizeof(value), "%.1f", temperatureMaximum);
@@ -270,6 +322,7 @@ void resetAlarmNotifications() {
 void savePortalParameters() {
   strlcpy(telegramBotToken, telegramTokenParameter.getValue(), sizeof(telegramBotToken));
   strlcpy(telegramChatId, telegramChatParameter.getValue(), sizeof(telegramChatId));
+  strlcpy(cloudDeviceKey, cloudKeyParameter.getValue(), sizeof(cloudDeviceKey));
   float tMin = String(temperatureMinimumParameter.getValue()).toFloat();
   float tMax = String(temperatureMaximumParameter.getValue()).toFloat();
   float pMin = String(phMinimumParameter.getValue()).toFloat();
@@ -279,6 +332,7 @@ void savePortalParameters() {
   preferences.begin("watermon", false);
   preferences.putString("tg_token", telegramBotToken);
   preferences.putString("tg_chat", telegramChatId);
+  preferences.putString("cloud_key", cloudDeviceKey);
   preferences.putFloat("temp_min", temperatureMinimum);
   preferences.putFloat("temp_max", temperatureMaximum);
   preferences.putFloat("ph_min", phMinimum);
@@ -287,7 +341,7 @@ void savePortalParameters() {
   initializeTelegram();
   resetAlarmNotifications();
   settingsSavedAt = millis();
-  Serial.println(F("Configuration saved; Telegram token hidden."));
+  Serial.println(F("Configuration saved; secret values hidden."));
 }
 
 void startConfigurationPortal() {
@@ -402,6 +456,8 @@ void handleDashboardStatus() {
   json += F("\",\"wifi\":\"");
   json += WiFi.status() == WL_CONNECTED ? "CONNECTED" : "OFFLINE";
   json += F("\",\"telegram\":\""); json += telegramBot ? "READY" : "NOT SET";
+  json += F("\",\"cloud\":\"");
+  json += lastCloudUploadSuccess ? (cloudLastUploadOk ? "SYNCED" : "ERROR") : "WAITING";
   json += F("\"}");
 
   dashboardServer.sendHeader("Cache-Control", "no-store");
@@ -465,6 +521,54 @@ void updateAlerts(unsigned long now) {
         "ALERT: Water level is LOW. Both S1 and S2 are DRY.",
         String("RECOVERY: Water level is now ") + waterLevelName(waterState) + ".", now);
   }
+}
+
+void updateCloudTelemetry(unsigned long now) {
+  if (WiFi.status() != WL_CONNECTED || strlen(cloudDeviceKey) == 0 ||
+      time(nullptr) <= 1700000000 || isnan(phValue) || isnan(waterTemperatureC)) return;
+  if (lastCloudUploadAttempt != 0 &&
+      now - lastCloudUploadAttempt < CLOUD_UPLOAD_INTERVAL_MS) return;
+  lastCloudUploadAttempt = now;
+
+  uint64_t chipId = ESP.getEfuseMac();
+  char deviceId[28];
+  snprintf(deviceId, sizeof(deviceId), "water-%04X%08X",
+           static_cast<uint16_t>(chipId >> 32), static_cast<uint32_t>(chipId));
+
+  String payload;
+  payload.reserve(180);
+  payload += F("{\"deviceId\":\""); payload += deviceId;
+  payload += F("\",\"ph\":"); payload += String(phValue, 2);
+  payload += F(",\"temperature\":"); payload += String(waterTemperatureC, 2);
+  payload += F(",\"sensor1\":"); payload += level1Detected ? F("true") : F("false");
+  payload += F(",\"sensor2\":"); payload += level2Detected ? F("true") : F("false");
+  payload += F(",\"waterLevel\":\""); payload += waterLevelName(getWaterLevelState());
+  payload += F("\"}");
+
+  WiFiClientSecure cloudClient;
+  cloudClient.setCACert(CLOUD_ROOT_CA);
+  HTTPClient http;
+  http.setConnectTimeout(CLOUD_HTTP_TIMEOUT_MS);
+  http.setTimeout(CLOUD_HTTP_TIMEOUT_MS);
+  if (!http.begin(cloudClient, CLOUD_API_URL)) {
+    cloudLastUploadOk = false;
+    Serial.println(F("Cloud sync: unable to start HTTPS connection."));
+    return;
+  }
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-Device-Key", cloudDeviceKey);
+  int statusCode = http.POST(payload);
+  cloudLastUploadOk = statusCode == HTTP_CODE_CREATED;
+  if (cloudLastUploadOk) {
+    lastCloudUploadSuccess = now;
+    Serial.printf("Cloud sync: uploaded successfully (HTTP %d).\n", statusCode);
+  } else if (statusCode > 0) {
+    Serial.printf("Cloud sync: failed (HTTP %d).\n", statusCode);
+  } else {
+    Serial.printf("Cloud sync: failed (%s).\n",
+                  HTTPClient::errorToString(statusCode).c_str());
+  }
+  http.end();
 }
 
 void updateDisplay() {
@@ -534,8 +638,12 @@ void updateDisplay() {
     printLcdRow(3, "WiFi NOT CONNECTED");
   } else if (!telegramBot) {
     printLcdRow(3, "TELEGRAM NOT SET");
+  } else if (lastCloudUploadAttempt != 0 && !cloudLastUploadOk) {
+    printLcdRow(3, "CLOUD SYNC ERROR");
+  } else if (lastCloudUploadSuccess != 0) {
+    printLcdRow(3, "SYSTEM + CLOUD OK");
   } else {
-    printLcdRow(3, "SYSTEM ALL NORMAL");
+    printLcdRow(3, "CLOUD CONNECTING...");
   }
 }
 
@@ -549,9 +657,10 @@ void printDebugOutput() {
                 level1Detected ? "WET" : "DRY",
                 level2Detected ? "WET" : "DRY",
                 waterLevelName(getWaterLevelState()));
-  Serial.printf("Wi-Fi: %s, Telegram configured: %s\n\n",
+  Serial.printf("Wi-Fi: %s, Telegram configured: %s, Cloud: %s\n\n",
                 WiFi.status() == WL_CONNECTED ? "CONNECTED" : "OFFLINE",
-                telegramBot ? "YES" : "NO");
+                telegramBot ? "YES" : "NO",
+                lastCloudUploadSuccess ? (cloudLastUploadOk ? "SYNCED" : "ERROR") : "WAITING");
 }
 
 void setup() {
@@ -588,6 +697,7 @@ void setup() {
   initializeTelegram();
   wifiManager.addParameter(&telegramTokenParameter);
   wifiManager.addParameter(&telegramChatParameter);
+  wifiManager.addParameter(&cloudKeyParameter);
   wifiManager.addParameter(&temperatureMinimumParameter);
   wifiManager.addParameter(&temperatureMaximumParameter);
   wifiManager.addParameter(&phMinimumParameter);
@@ -626,6 +736,7 @@ void loop() {
     updateAlerts(now);
     updateDisplay();
   }
+  updateCloudTelemetry(now);
   if (now - lastSerialUpdate >= SERIAL_INTERVAL_MS) {
     lastSerialUpdate = now;
     printDebugOutput();
